@@ -8,17 +8,14 @@ export async function POST(request: NextRequest) {
   try {
     const { name, email, subject, message, turnstileToken } = await request.json();
 
-    // Validasi form
     if (!name || !email || !subject || !message || !turnstileToken) {
       return NextResponse.json({ error: "Form tidak lengkap." }, { status: 400 });
     }
 
-    // ✅ Verifikasi Turnstile di server
+    // ✅ Verifikasi Turnstile
     const verifyRes = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         secret: process.env.TURNSTILE_SECRET_KEY,
         response: turnstileToken,
@@ -26,18 +23,17 @@ export async function POST(request: NextRequest) {
     });
 
     const verifyData = await verifyRes.json();
-
     if (!verifyData.success) {
       console.warn("Turnstile verification failed:", verifyData);
       return NextResponse.json({ error: "Verifikasi keamanan gagal." }, { status: 400 });
     }
 
-    // ✅ Kirim email via Resend
+    // ✅ Kirim email — perbaikan: `reply_to` → `replyTo`
     const { data, error } = await resend.emails.send({
       from: "Kontak <contact@gemasoft.id>",
       to: "hello@gemasoft.id",
       subject: `[Kontak] ${subject} — dari ${name}`,
-      reply_to: email,
+      replyTo: email, // ✅ ini yang diperbaiki
       html: `
         <p><strong>Nama:</strong> ${name}</p>
         <p><strong>Email:</strong> <a href="mailto:${email}">${email}</a></p>
