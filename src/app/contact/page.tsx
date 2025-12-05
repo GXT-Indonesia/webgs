@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 
 export default function Contact() {
   const [formState, setFormState] = useState({
@@ -11,14 +11,47 @@ export default function Contact() {
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitStatus, setSubmitStatus] = useState<"idle" | "success" | "error">("idle");
+  const turnstileRef = useRef<HTMLDivElement>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
     setFormState((prev) => ({ ...prev, [name]: value }));
   };
 
+  // Inisialisasi Turnstile
+  useEffect(() => {
+    if (typeof window === "undefined" || !turnstileRef.current) return;
+
+    const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
+    if (!siteKey) {
+      console.warn("NEXT_PUBLIC_TURNSTILE_SITE_KEY belum di-set");
+      return;
+    }
+
+    // @ts-ignore
+    window.turnstile.render(turnstileRef.current, {
+      sitekey: siteKey,
+      callback: (token: string) => {
+        setTurnstileToken(token);
+      },
+      "expired-callback": () => {
+        setTurnstileToken(null);
+      },
+      "error-callback": () => {
+        setTurnstileToken(null);
+      },
+    });
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!turnstileToken) {
+      setSubmitStatus("error");
+      alert("Harap tunggu verifikasi keamanan...");
+      return;
+    }
+
     setIsSubmitting(true);
     setSubmitStatus("idle");
 
@@ -26,16 +59,23 @@ export default function Contact() {
       const res = await fetch("/api/contact", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formState),
+        body: JSON.stringify({ ...formState, turnstileToken }),
       });
 
       if (res.ok) {
         setSubmitStatus("success");
         setFormState({ name: "", email: "", subject: "", message: "" });
+        // Refresh token Turnstile
+        // @ts-ignore
+        window.turnstile.reset();
+        setTurnstileToken(null);
       } else {
+        const data = await res.json();
+        console.error("API error:", data);
         setSubmitStatus("error");
       }
-    } catch {
+    } catch (err) {
+      console.error(err);
       setSubmitStatus("error");
     } finally {
       setIsSubmitting(false);
@@ -116,20 +156,27 @@ export default function Contact() {
               />
             </div>
 
+            {/* Turnstile Widget (invisible) */}
+            <div className="pt-2">
+              <div ref={turnstileRef} />
+            </div>
+
             {submitStatus === "success" && (
               <p className="text-green-600 text-sm font-medium">✅ Pesan berhasil dikirim. Terima kasih!</p>
             )}
             {submitStatus === "error" && (
               <p className="text-red-600 text-sm font-medium">
-                ❌ Gagal mengirim pesan. Silakan coba lagi atau hubungi via email.
+                ❌ Gagal mengirim. Periksa koneksi atau coba lagi.
               </p>
             )}
 
             <button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || !turnstileToken}
               className={`w-full py-3 px-4 rounded-lg font-medium text-white ${
-                isSubmitting ? "bg-blue-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"
+                isSubmitting || !turnstileToken
+                  ? "bg-gray-400 cursor-not-allowed"
+                  : "bg-blue-600 hover:bg-blue-700"
               } transition`}
             >
               {isSubmitting ? "Mengirim…" : "Kirim Pesan"}
@@ -139,7 +186,6 @@ export default function Contact() {
 
         {/* Info Kontak Alternatif */}
         <div className="space-y-6">
-          {/* Email */}
           <div className="p-6 bg-gray-50 rounded-xl border border-gray-200">
             <div className="text-gray-500 mb-2 text-sm font-medium">Email</div>
             <a
@@ -150,27 +196,33 @@ export default function Contact() {
             </a>
           </div>
 
-          {/* Telepon / WhatsApp */}
           <div className="p-6 bg-gray-50 rounded-xl border border-gray-200">
-            <div className="text-gray-500 mb-2 text-sm font-medium">Telepon / WhatsApp</div>
+            <div className="text-gray-500 mb-2 text-sm font-medium">Telepon</div>
             <a
               href="https://wa.me/6281234567890"
               target="_blank"
               rel="noopener noreferrer"
               className="text-xl font-semibold text-gray-900 hover:text-green-600 transition flex items-center justify-center gap-2"
             >
-              +62 812-3456-7890
+              +62 21 3971 5430
             </a>
             <p className="mt-2 text-gray-600 text-sm">
-              Layanan tersedia Senin–Jumat, 08.00–17.00 WIB
+              
             </p>
           </div>
         </div>
 
         <div className="mt-8 text-gray-500 text-sm text-center">
-          <p>Kami biasanya merespons dalam 1×24 jam pada hari kerja.</p>
+          <p></p>
         </div>
       </div>
+
+      {/* Load Turnstile script — hanya sekali di seluruh app */}
+      <script
+        src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+        async
+        defer
+      />
     </div>
   );
 }

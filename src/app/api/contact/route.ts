@@ -6,45 +6,58 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(request: NextRequest) {
   try {
-    const { name, email, subject, message } = await request.json();
+    const { name, email, subject, message, turnstileToken } = await request.json();
 
-    // Validasi dasar
-    if (!name || !email || !subject || !message) {
-      return NextResponse.json(
-        { error: "Semua field wajib diisi." },
-        { status: 400 }
-      );
+    // Validasi form
+    if (!name || !email || !subject || !message || !turnstileToken) {
+      return NextResponse.json({ error: "Form tidak lengkap." }, { status: 400 });
     }
 
-    // Kirim email via Resend
+    // ✅ Verifikasi Turnstile di server
+    const verifyRes = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        secret: process.env.TURNSTILE_SECRET_KEY,
+        response: turnstileToken,
+      }),
+    });
+
+    const verifyData = await verifyRes.json();
+
+    if (!verifyData.success) {
+      console.warn("Turnstile verification failed:", verifyData);
+      return NextResponse.json({ error: "Verifikasi keamanan gagal." }, { status: 400 });
+    }
+
+    // ✅ Kirim email via Resend
     const { data, error } = await resend.emails.send({
-      from: "Kontak <contact@gemasoft.id>", // ✅ pastikan sudah diverifikasi di Resend
+      from: "Kontak <contact@gemasoft.id>",
       to: "hello@gemasoft.id",
-      subject: `[Kontak Website] ${subject}`,
+      subject: `[Kontak] ${subject} — dari ${name}`,
       reply_to: email,
-      text: `Dari: ${name} (${email})\n\n${message}`,
-      html: `<p><strong>Nama:</strong> ${name}</p>
-             <p><strong>Email:</strong> <a href="mailto:${email}">${email}</a></p>
-             <hr/>
-             <p><strong>Pesan:</strong></p>
-             <p>${message.replace(/\n/g, "<br/>")}</p>`,
+      html: `
+        <p><strong>Nama:</strong> ${name}</p>
+        <p><strong>Email:</strong> <a href="mailto:${email}">${email}</a></p>
+        <hr style="margin:16px 0"/>
+        <h3>Pesan:</h3>
+        <p>${message.replace(/\n/g, "<br/>")}</p>
+        <hr style="margin:16px 0"/>
+        <p><small>Skor Turnstile: ${verifyData.score || "?"}</small></p>
+      `,
     });
 
     if (error) {
       console.error("Resend error:", error);
-      return NextResponse.json(
-        { error: "Gagal mengirim email." },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Gagal mengirim email." }, { status: 500 });
     }
 
-    return NextResponse.json({ success: true, id: data?.id }, { status: 200 });
+    return NextResponse.json({ success: true, id: data?.id });
 
   } catch (err) {
-    console.error("Unexpected error:", err);
-    return NextResponse.json(
-      { error: "Terjadi kesalahan internal." },
-      { status: 500 }
-    );
+    console.error("API error:", err);
+    return NextResponse.json({ error: "Kesalahan server." }, { status: 500 });
   }
 }
